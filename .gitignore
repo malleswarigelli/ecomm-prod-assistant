@@ -7,6 +7,12 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.prod-assistant
 .venv
 
+.env
+
+.vscode/
+*.log
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/.env 
