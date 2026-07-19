@@ -32,7 +32,6 @@ class FlipkartScraper:
             driver.get(product_url)
             time.sleep(3)
             
-            # Dismiss login popups if any
             try:
                 driver.find_element(By.XPATH, "//button[contains(text(), '✕')]").click()
                 time.sleep(1)
@@ -46,17 +45,15 @@ class FlipkartScraper:
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
             
-            # Target common review text containers on Flipkart product pages
-            review_blocks = soup.find_all("div", class_=lambda c: c in ["ZmyHe8", "EPCmJX", "_6K-7Co", "_27M-vq"])
+            # Using CSS selectors to bypass the BS4 class-list bug
+            review_blocks = soup.select("div.ZmyHe8, div.EPCmJX, div._6K-7Co, div._27M-vq")
             
             seen = set()
             reviews = []
 
             for block in review_blocks:
-                # Extract clean text from the review block
                 text = block.get_text(separator=" ", strip=True)
                 if text and text not in seen:
-                    # Clean up double spaces or weird characters
                     text = re.sub(r'\s+', ' ', text)
                     reviews.append(text)
                     seen.add(text)
@@ -80,16 +77,15 @@ class FlipkartScraper:
         
         print(f"Opening search URL: {search_url}")
         driver.get(search_url)
-        time.sleep(5)  # Give the page ample time to load completely
+        time.sleep(5)  
 
         try:
             driver.find_element(By.XPATH, "//button[contains(text(), '✕')]").click()
         except Exception:
             pass
 
-        # Parse the page source with BeautifulSoup
         soup = BeautifulSoup(driver.page_source, "html.parser")
-        driver.quit()  # We can close the main driver early to save memory
+        driver.quit()  
 
         # Find all product containers
         items = soup.find_all("div", attrs={"data-id": True})
@@ -104,9 +100,9 @@ class FlipkartScraper:
 
             try:
                 # 1. Extract Product Link & ID
-                link_el = item.find("a", href=lambda h: h and "/p/" in h)
+                link_el = item.select_one("a[href*='/p/']")
                 if not link_el:
-                    continue  # Skip containers that aren't actual product cards
+                    continue  
                 
                 href = link_el.get("href")
                 product_link = href if href.startswith("http") else "https://www.flipkart.com" + href
@@ -116,32 +112,61 @@ class FlipkartScraper:
                 if match:
                     product_id = match.group(1)
 
-                # 2. Extract Title (with robust fallbacks)
+                # 2. Extract Title (CSS selector + Text fallback)
                 title = "Unknown Product Title"
-                title_el = item.find(class_=lambda c: c in ["KzDlHZ", "wjcEIp", "IRpwZg", "_4rR01T", "CGtC98"])
+                title_el = item.select_one("div.KzDlHZ, a.wjcEIp, a.IRpwZg, div._4rR01T, a.CGtC98, div.yKfS8Y")
                 if title_el:
                     title = title_el.get_text(strip=True)
+                else:
+                    # Fallback: Find any link or div containing query terms
+                    for tag in ["a", "div"]:
+                        for el in item.find_all(tag):
+                            txt = el.get_text(strip=True)
+                            if len(txt) > 10 and any(word.lower() in txt.lower() for word in query.split()):
+                                title = txt
+                                break
+                        if title != "Unknown Product Title":
+                            break
 
-                # 3. Extract Price
+                # 3. Extract Price (CSS selector + Currency fallback)
                 price = "N/A"
-                price_el = item.find(class_=lambda c: c in ["Nx9bqj", "_30jeq3", "_10g97Y"])
+                price_el = item.select_one("div.Nx9bqj, div._30jeq3, div._10g97Y")
                 if price_el:
                     price = price_el.get_text(strip=True)
+                else:
+                    # Fallback: Look for the Rupee symbol (₹)
+                    price_text = item.find(string=re.compile(r"₹"))
+                    if price_text:
+                        price = price_text.strip()
 
-                # 4. Extract Rating
+                # 4. Extract Rating (CSS selector + Pattern fallback)
                 rating = "N/A"
-                rating_el = item.find(class_=lambda c: c in ["XQDdHH", "_3LWZlK", "Y10E2D"])
+                rating_el = item.select_one("div.XQDdHH, div._3LWZlK, span.Y10E2D")
                 if rating_el:
                     rating = rating_el.get_text(strip=True)
+                else:
+                    # Fallback: Look for standard 1-5 star patterns
+                    for div in item.find_all("div"):
+                        txt = div.get_text(strip=True)
+                        if re.match(r"^[1-5]\.[0-9]$", txt):
+                            rating = txt
+                            break
 
                 # 5. Extract Total Reviews Count
                 total_reviews = "N/A"
-                reviews_el = item.find(class_=lambda c: c in ["Wphh3N", "_2_R_DZ"])
+                reviews_el = item.select_one("span.Wphh3N, span._2_R_DZ")
                 if reviews_el:
                     reviews_text = reviews_el.get_text(strip=True)
-                    match_rev = re.search(r"(\d[\d,]*)\s+Reviews", reviews_text)
+                    match_rev = re.search(r"(\d[\d,]*)\s+(Reviews|Ratings)", reviews_text, re.IGNORECASE)
                     if match_rev:
                         total_reviews = match_rev.group(1)
+                else:
+                    # Fallback: Search text nodes for 'Reviews'
+                    rev_text = item.find(string=re.compile(r"Reviews|Ratings", re.IGNORECASE))
+                    if rev_text:
+                        match_rev = re.search(r"(\d[\d,]*)\s+(Reviews|Ratings)", rev_text, re.IGNORECASE)
+                        if match_rev:
+                            total_reviews = match_rev.group(1)
 
                 print(f"[{processed_count+1}/{max_products}] Found: {title} | Price: {price} | Rating: {rating}")
 
