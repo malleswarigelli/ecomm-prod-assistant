@@ -30,7 +30,7 @@ class FlipkartScraper:
 
         try:
             driver.get(product_url)
-            time.sleep(3)
+            time.sleep(4)
             
             try:
                 driver.find_element(By.XPATH, "//button[contains(text(), '✕')]").click()
@@ -38,23 +38,26 @@ class FlipkartScraper:
             except Exception:
                 pass
 
-            # Scroll down to trigger lazy-loaded reviews
-            for _ in range(2):
-                ActionChains(driver).send_keys(Keys.END).perform()
-                time.sleep(1)
+            # Scroll down incrementally to trigger lazy-loading of reviews
+            for _ in range(4):
+                driver.execute_script("window.scrollBy(0, 1000);")
+                time.sleep(1.5)
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
             
-            # Using CSS selectors to bypass the BS4 class-list bug
-            review_blocks = soup.select("div.ZmyHe8, div.EPCmJX, div._6K-7Co, div._27M-vq")
+            # Target specific review containers on Flipkart product pages
+            review_blocks = soup.select("div.ZmyHe8, div.EPCmJX, div._6K-7Co, div._27M-vq, div.col._2wzgFH")
             
             seen = set()
             reviews = []
 
             for block in review_blocks:
                 text = block.get_text(separator=" ", strip=True)
-                if text and text not in seen:
-                    text = re.sub(r'\s+', ' ', text)
+                # Clean up "Read More" links often appended to reviews
+                text = re.sub(r'\s*Read More\s*$', '', text, flags=re.IGNORECASE)
+                text = re.sub(r'\s+', ' ', text)
+                
+                if text and len(text) > 15 and text not in seen:
                     reviews.append(text)
                     seen.add(text)
                 if len(reviews) >= count:
@@ -112,45 +115,38 @@ class FlipkartScraper:
                 if match:
                     product_id = match.group(1)
 
-                # 2. Extract Title (CSS selector + Text fallback)
+                # 2. Extract Title (CSS selector + Smart short-text fallback)
                 title = "Unknown Product Title"
-                title_el = item.select_one("div.KzDlHZ, a.wjcEIp, a.IRpwZg, div._4rR01T, a.CGtC98, div.yKfS8Y")
+                title_el = item.select_one("div.KzDlHZ, a.wjcEIp, div._4rR01T, a.IRpwZg, a.CGtC98")
                 if title_el:
                     title = title_el.get_text(strip=True)
                 else:
-                    # Fallback: Find any link or div containing query terms
+                    # Smart fallback: Find leaf elements containing query words (must be short and not contain price symbols)
                     for tag in ["a", "div"]:
                         for el in item.find_all(tag):
-                            txt = el.get_text(strip=True)
-                            if len(txt) > 10 and any(word.lower() in txt.lower() for word in query.split()):
-                                title = txt
-                                break
+                            if not el.find("div"):  # Is a leaf node
+                                txt = el.get_text(strip=True)
+                                if 15 < len(txt) < 100 and "₹" not in txt and any(word.lower() in txt.lower() for word in query.split()):
+                                    title = txt
+                                    break
                         if title != "Unknown Product Title":
                             break
 
-                # 3. Extract Price (CSS selector + Currency fallback)
+                # 3. Extract Price
                 price = "N/A"
                 price_el = item.select_one("div.Nx9bqj, div._30jeq3, div._10g97Y")
                 if price_el:
                     price = price_el.get_text(strip=True)
                 else:
-                    # Fallback: Look for the Rupee symbol (₹)
                     price_text = item.find(string=re.compile(r"₹"))
                     if price_text:
                         price = price_text.strip()
 
-                # 4. Extract Rating (CSS selector + Pattern fallback)
+                # 4. Extract Rating
                 rating = "N/A"
                 rating_el = item.select_one("div.XQDdHH, div._3LWZlK, span.Y10E2D")
                 if rating_el:
                     rating = rating_el.get_text(strip=True)
-                else:
-                    # Fallback: Look for standard 1-5 star patterns
-                    for div in item.find_all("div"):
-                        txt = div.get_text(strip=True)
-                        if re.match(r"^[1-5]\.[0-9]$", txt):
-                            rating = txt
-                            break
 
                 # 5. Extract Total Reviews Count
                 total_reviews = "N/A"
@@ -160,13 +156,6 @@ class FlipkartScraper:
                     match_rev = re.search(r"(\d[\d,]*)\s+(Reviews|Ratings)", reviews_text, re.IGNORECASE)
                     if match_rev:
                         total_reviews = match_rev.group(1)
-                else:
-                    # Fallback: Search text nodes for 'Reviews'
-                    rev_text = item.find(string=re.compile(r"Reviews|Ratings", re.IGNORECASE))
-                    if rev_text:
-                        match_rev = re.search(r"(\d[\d,]*)\s+(Reviews|Ratings)", rev_text, re.IGNORECASE)
-                        if match_rev:
-                            total_reviews = match_rev.group(1)
 
                 print(f"[{processed_count+1}/{max_products}] Found: {title} | Price: {price} | Rating: {rating}")
 
