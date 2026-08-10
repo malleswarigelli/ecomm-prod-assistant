@@ -17,8 +17,8 @@ class DataIngestion:
         Initialize environment variables, embedding model, and set CSV file path.
         """
         print("Initializing DataIngestion pipeline...")
-        self.model_loader=ModelLoader()
         self._load_env_variables()
+        self.model_loader=ModelLoader()
         self.csv_path = self._get_csv_path()
         self.product_data = self._load_csv()
         self.config=load_config()
