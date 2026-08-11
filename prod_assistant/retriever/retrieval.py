@@ -52,7 +52,9 @@ class Retriever:
                 )
         if not self.retriever_instance:
             top_k = self.config["retriever"]["top_k"] if "retriever" in self.config else 3
-            
+            retriever=self.vstore.as_retriever(search_kwargs={"k": top_k})
+        #     print("Retriever loaded successfully.")
+        # return retriever
             mmr_retriever=self.vstore.as_retriever(
                 search_type="mmr",
                 search_kwargs={"k": top_k,
@@ -61,17 +63,18 @@ class Retriever:
                                 "score_threshold": 0.6
                                })
             print("Retriever loaded successfully.")
+        return mmr_retriever    
+    
+        #     llm = self.model_loader.load_llm()
             
-            llm = self.model_loader.load_llm()
+        #     compressor=LLMChainFilter.from_llm(llm)
             
-            compressor=LLMChainFilter.from_llm(llm)
+        #     self.retriever_instance = ContextualCompressionRetriever(
+        #         base_compressor=compressor, 
+        #         base_retriever=mmr_retriever
+        #     )
             
-            self.retriever_instance = ContextualCompressionRetriever(
-                base_compressor=compressor, 
-                base_retriever=mmr_retriever
-            )
-            
-        return self.retriever_instance
+        # return self.retriever_instance
             
     def call_retriever(self,query):
         """_summary_
@@ -102,7 +105,7 @@ if __name__=='__main__':
             formatted_chunks.append(formatted)
         return "\n\n---\n\n".join(formatted_chunks)
     
-    retrieved_contexts = [_format_docs(doc) for doc in retrieved_docs]
+    retrieved_contexts = [_format_docs([doc]) for doc in retrieved_docs]
     
     #this is not an actual output this have been written to test the pipeline
     response="iphone 16, iphone 15 are best phones under 1,00,000 INR."
