@@ -89,6 +89,8 @@ if __name__=='__main__':
     retriever_obj = Retriever()
     
     retrieved_docs = retriever_obj.call_retriever(user_query)
+    for idx, doc in enumerate(retrieved_docs, 1):
+        print(f"Result {idx}: {doc.page_content}\nMetadata: {doc.metadata}\n")
     
     def _format_docs(docs) -> str:
         if not docs:
@@ -106,7 +108,7 @@ if __name__=='__main__':
         return "\n\n---\n\n".join(formatted_chunks)
     
     retrieved_contexts = [_format_docs([doc]) for doc in retrieved_docs]
-    
+
     #this is not an actual output this have been written to test the pipeline
     response="iphone 16, iphone 15 are best phones under 1,00,000 INR."
     
