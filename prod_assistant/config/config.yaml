@@ -11,13 +11,13 @@ retriever:
 llm:
   groq:
     provider: "groq"
-    model_name: "deepseek-r1-distill-llama-70b"
+    model_name: "llama-3.3-70b-versatile"
     temperature: 0
     max_output_tokens: 2048
 
   google:
     provider: "google"
-    model_name: "gemini-2.0-flash"
+    model_name: "gemini-3.5-flash"
     temperature: 0
     max_output_tokens: 2048
 

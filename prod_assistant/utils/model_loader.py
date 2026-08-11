@@ -9,7 +9,7 @@ from langchain_groq import ChatGroq
 from logger import GLOBAL_LOGGER as log
 from exception.custom_exception import ProductAssistantException
 import asyncio
-
+load_dotenv()
 
 class ApiKeyManager:
     def __init__(self):
@@ -41,27 +41,27 @@ class ModelLoader:
         self.api_key_mgr = ApiKeyManager()
         self.config = load_config()
         log.info("YAML config loaded", config_keys=list(self.config.keys()))
+        self._embeddings = None   # cache
 
     
 
     def load_embeddings(self):
-        """
-        Load and return embedding model from Google Generative AI.
-        """
+        """Load (once) and return the Google embedding model."""
+        if self._embeddings is not None:
+            return self._embeddings
         try:
             model_name = self.config["embedding_model"]["model_name"]
             log.info("Loading embedding model", model=model_name)
 
-            # Patch: Ensure an event loop exists for gRPC aio
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                asyncio.set_event_loop(asyncio.new_event_loop())
+            # ensure the API key is visible to the google client via env too
+            os.environ["GOOGLE_API_KEY"] = self.api_key_mgr.get("GOOGLE_API_KEY") or ""
 
-            return GoogleGenerativeAIEmbeddings(
+            self._embeddings = GoogleGenerativeAIEmbeddings(
                 model=model_name,
-                google_api_key=self.api_key_mgr.get("GOOGLE_API_KEY")  # type: ignore
+                google_api_key=self.api_key_mgr.get("GOOGLE_API_KEY"),
+                transport="rest",
             )
+            return self._embeddings
         except Exception as e:
             log.error("Error loading embedding model", error=str(e))
             raise ProductAssistantException("Failed to load embedding model", sys)
@@ -72,7 +72,7 @@ class ModelLoader:
         Load and return the configured LLM model.
         """
         llm_block = self.config["llm"]
-        provider_key = os.getenv("LLM_PROVIDER", "openai")
+        provider_key = os.getenv("LLM_PROVIDER", "groq")
 
         if provider_key not in llm_block:
             log.error("LLM provider not found in config", provider=provider_key)
@@ -91,7 +91,8 @@ class ModelLoader:
                 model=model_name,
                 google_api_key=self.api_key_mgr.get("GOOGLE_API_KEY"),
                 temperature=temperature,
-                max_output_tokens=max_tokens
+                max_output_tokens=max_tokens,
+                transport="rest"
             )
 
         elif provider == "groq":
