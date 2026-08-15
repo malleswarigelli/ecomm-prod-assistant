@@ -1,0 +1,134 @@
+name: Deploy App to EKS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Check if EKS Cluster exists
+      - name: Check if EKS Cluster exists
+        run: |
+          if ! aws eks describe-cluster --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}; then
+            echo "EKS Cluster not found! Run infra.yml workflow first."
+            exit 1
+          fi
+
+      # Login to ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set Image Tag
+        id: image-tag
+        run: |
+          echo "IMAGE_TAG=$(date +%s)" >> $GITHUB_ENV
+          echo "::set-output name=tag::$(date +%s)"
+      
+      # Build, tag and push Docker image to ECR
+      - name: Build and Push Docker image
+        env:
+          REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest .
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          docker push $REGISTRY/$REPOSITORY:latest
+
+      # Setup kubectl
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      # Ensure AWS CLI is installed
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+          aws --version
+    
+      - name: Print Env Vars
+        run: |
+          echo "Region: ${{ secrets.AWS_REGION }}"
+          echo "Cluster: ${{ secrets.EKS_CLUSTER_NAME }}"  
+      
+      # Update kubeconfig
+      - name: Update kubeconfig with debug
+        run: |
+          aws eks update-kubeconfig \
+            --name $EKS_CLUSTER_NAME \
+            --region $AWS_REGION \
+            --debug
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+
+      # Debug: Show kubeconfig file
+      - name: Show kubeconfig
+        run: |
+          ls -la ~/.kube || true
+          cat ~/.kube/config || true
+      
+      # Create/Update Kubernetes Secret (for API keys)
+      - name: Create Kubernetes secret for API keys
+        run: |
+          kubectl create secret generic product-assistant-secrets \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }} \
+            --from-literal=ASTRA_DB_API_ENDPOINT=${{ secrets.ASTRA_DB_API_ENDPOINT }} \
+            --from-literal=ASTRA_DB_APPLICATION_TOKEN=${{ secrets.ASTRA_DB_APPLICATION_TOKEN }} \
+            --from-literal=ASTRA_DB_KEYSPACE=${{ secrets.ASTRA_DB_KEYSPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # Deploy manifests
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8/deployment.yaml
+          kubectl apply -f k8/service.yaml
+
+      - name: Patch deployment with new image tag
+        env:
+          REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          kubectl set image deployment/product-assistant product-assistant=$REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+
+      # Verify rollout
+      - name: Verify Deployment
+        run: |
+          set -e
+          if ! kubectl rollout status deployment/product-assistant --timeout=120s; then
+            echo "Rollout failed, collecting debug info..."
+            kubectl describe deployment product-assistant || true
+            kubectl get pods -o wide || true
+            for pod in $(kubectl get pods -l app=product-assistant -o jsonpath='{.items[*].metadata.name}'); do
+              echo "--- Logs for pod: $pod ---"
+              kubectl logs $pod --all-containers --tail=100 || true
+            done
+            exit 1
+          fi
+
+      # Show Service details
+      - name: Get Service Info
+        run: kubectl get svc product-assistant-service -o wide
