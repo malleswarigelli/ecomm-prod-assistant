@@ -12,11 +12,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Configure AWS credentials
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -25,7 +25,7 @@ jobs:
       # Check if EKS Cluster exists
       - name: Check if EKS Cluster exists
         run: |
-          if ! aws eks describe-cluster --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}; then
+          if ! aws eks describe-cluster --name "${{ secrets.EKS_CLUSTER_NAME }}" --region "${{ secrets.AWS_REGION }}"; then
             echo "EKS Cluster not found! Run infra.yml workflow first."
             exit 1
           fi
@@ -33,13 +33,15 @@ jobs:
       # Login to ECR
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
+      # Corrected: Using modern $GITHUB_OUTPUT syntax
       - name: Set Image Tag
         id: image-tag
         run: |
-          echo "IMAGE_TAG=$(date +%s)" >> $GITHUB_ENV
-          echo "::set-output name=tag::$(date +%s)"
+          TAG=$(date +%s)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
       
       # Build, tag and push Docker image to ECR
       - name: Build and Push Docker image
@@ -48,9 +50,9 @@ jobs:
           REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -t $REGISTRY/$REPOSITORY:latest .
-          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
-          docker push $REGISTRY/$REPOSITORY:latest
+          docker build -t "$REGISTRY/$REPOSITORY:$IMAGE_TAG" -t "$REGISTRY/$REPOSITORY:latest" .
+          docker push "$REGISTRY/$REPOSITORY:$IMAGE_TAG"
+          docker push "$REGISTRY/$REPOSITORY:latest"
 
       # Setup kubectl
       - name: Setup kubectl
@@ -75,8 +77,8 @@ jobs:
       - name: Update kubeconfig with debug
         run: |
           aws eks update-kubeconfig \
-            --name $EKS_CLUSTER_NAME \
-            --region $AWS_REGION \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
             --debug
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -93,10 +95,10 @@ jobs:
         run: |
           kubectl create secret generic product-assistant-secrets \
             --from-literal=GROQ_API_KEY="${{ secrets.GROQ_API_KEY }}" \
-            --from-literal=GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }} \
-            --from-literal=ASTRA_DB_API_ENDPOINT=${{ secrets.ASTRA_DB_API_ENDPOINT }} \
-            --from-literal=ASTRA_DB_APPLICATION_TOKEN=${{ secrets.ASTRA_DB_APPLICATION_TOKEN }} \
-            --from-literal=ASTRA_DB_KEYSPACE=${{ secrets.ASTRA_DB_KEYSPACE }} \
+            --from-literal=GOOGLE_API_KEY="${{ secrets.GOOGLE_API_KEY }}" \
+            --from-literal=ASTRA_DB_API_ENDPOINT="${{ secrets.ASTRA_DB_API_ENDPOINT }}" \
+            --from-literal=ASTRA_DB_APPLICATION_TOKEN="${{ secrets.ASTRA_DB_APPLICATION_TOKEN }}" \
+            --from-literal=ASTRA_DB_KEYSPACE="${{ secrets.ASTRA_DB_KEYSPACE }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # Deploy manifests
@@ -111,8 +113,7 @@ jobs:
           REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          kubectl set image deployment/product-assistant product-assistant=$REGISTRY/$REPOSITORY:$IMAGE_TAG
-
+          kubectl set image deployment/product-assistant product-assistant="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
 
       # Verify rollout
       - name: Verify Deployment
@@ -124,7 +125,7 @@ jobs:
             kubectl get pods -o wide || true
             for pod in $(kubectl get pods -l app=product-assistant -o jsonpath='{.items[*].metadata.name}'); do
               echo "--- Logs for pod: $pod ---"
-              kubectl logs $pod --all-containers --tail=100 || true
+              kubectl logs "$pod" --all-containers --tail=100 || true
             done
             exit 1
           fi
