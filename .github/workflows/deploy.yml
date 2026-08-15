@@ -92,7 +92,7 @@ jobs:
       - name: Create Kubernetes secret for API keys
         run: |
           kubectl create secret generic product-assistant-secrets \
-            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=GROQ_API_KEY="${{ secrets.GROQ_API_KEY }}" \
             --from-literal=GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }} \
             --from-literal=ASTRA_DB_API_ENDPOINT=${{ secrets.ASTRA_DB_API_ENDPOINT }} \
             --from-literal=ASTRA_DB_APPLICATION_TOKEN=${{ secrets.ASTRA_DB_APPLICATION_TOKEN }} \
