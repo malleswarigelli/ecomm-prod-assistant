@@ -27,12 +27,22 @@ class AgenticRAG:
         self.checkpointer = MemorySaver()
 
         # Initialize MCP client
+        # self.mcp_client = MultiServerMCPClient(
+        #     {
+        #         "hybrid_search": {
+        #             "command": "python",
+        #             "args": ["C:\LLMOPs_course_KrishNaik\ecomm-prod-assistant\prod_assistant\mcp_servers\product_search_server.py"],
+        #             "transport": "stdio",
+        #         }
+        #     }
+        # )
+
+        # Initialize MCP client
         self.mcp_client = MultiServerMCPClient(
             {
                 "hybrid_search": {
-                    "command": "python",
-                    "args": ["C:\LLMOPs_course_KrishNaik\ecomm-prod-assistant\prod_assistant\mcp_servers\product_search_server.py"],
-                    "transport": "stdio",
+                    "transport": "streamable_http",
+                    "url": "http://localhost:8000/mcp"
                 }
             }
         )
