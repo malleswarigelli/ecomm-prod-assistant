@@ -24,8 +24,11 @@ jobs:
 
       # Check if EKS Cluster exists
       - name: Check if EKS Cluster exists
+        env:
+          EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          if ! aws eks describe-cluster --name "${{ secrets.EKS_CLUSTER_NAME }}" --region "${{ secrets.AWS_REGION }}"; then
+          if ! aws eks describe-cluster --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"; then
             echo "EKS Cluster not found! Run infra.yml workflow first."
             exit 1
           fi
@@ -35,7 +38,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Corrected: Using modern $GITHUB_OUTPUT syntax
+      # Set Image Tag
       - name: Set Image Tag
         id: image-tag
         run: |
@@ -46,7 +49,7 @@ jobs:
       # Build, tag and push Docker image to ECR
       - name: Build and Push Docker image
         env:
-          REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
@@ -69,20 +72,23 @@ jobs:
           aws --version
     
       - name: Print Env Vars
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
         run: |
-          echo "Region: ${{ secrets.AWS_REGION }}"
-          echo "Cluster: ${{ secrets.EKS_CLUSTER_NAME }}"  
+          echo "Region: $AWS_REGION"
+          echo "Cluster: $EKS_CLUSTER_NAME"  
       
       # Update kubeconfig
       - name: Update kubeconfig with debug
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
         run: |
           aws eks update-kubeconfig \
             --name "$EKS_CLUSTER_NAME" \
             --region "$AWS_REGION" \
             --debug
-        env:
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
 
       # Debug: Show kubeconfig file
       - name: Show kubeconfig
@@ -90,15 +96,21 @@ jobs:
           ls -la ~/.kube || true
           cat ~/.kube/config || true
       
-      # Create/Update Kubernetes Secret (for API keys)
+      # Create/Update Kubernetes Secret
       - name: Create Kubernetes secret for API keys
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ASTRA_DB_API_ENDPOINT: ${{ secrets.ASTRA_DB_API_ENDPOINT }}
+          ASTRA_DB_APPLICATION_TOKEN: ${{ secrets.ASTRA_DB_APPLICATION_TOKEN }}
+          ASTRA_DB_KEYSPACE: ${{ secrets.ASTRA_DB_KEYSPACE }}
         run: |
           kubectl create secret generic product-assistant-secrets \
-            --from-literal=GROQ_API_KEY="${{ secrets.GROQ_API_KEY }}" \
-            --from-literal=GOOGLE_API_KEY="${{ secrets.GOOGLE_API_KEY }}" \
-            --from-literal=ASTRA_DB_API_ENDPOINT="${{ secrets.ASTRA_DB_API_ENDPOINT }}" \
-            --from-literal=ASTRA_DB_APPLICATION_TOKEN="${{ secrets.ASTRA_DB_APPLICATION_TOKEN }}" \
-            --from-literal=ASTRA_DB_KEYSPACE="${{ secrets.ASTRA_DB_KEYSPACE }}" \
+            --from-literal=GROQ_API_KEY="$GROQ_API_KEY" \
+            --from-literal=GOOGLE_API_KEY="$GOOGLE_API_KEY" \
+            --from-literal=ASTRA_DB_API_ENDPOINT="$ASTRA_DB_API_ENDPOINT" \
+            --from-literal=ASTRA_DB_APPLICATION_TOKEN="$ASTRA_DB_APPLICATION_TOKEN" \
+            --from-literal=ASTRA_DB_KEYSPACE="$ASTRA_DB_KEYSPACE" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # Deploy manifests
@@ -107,9 +119,10 @@ jobs:
           kubectl apply -f k8/deployment.yaml
           kubectl apply -f k8/service.yaml
 
+      # Patch deployment with new image tag
       - name: Patch deployment with new image tag
         env:
-          REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
